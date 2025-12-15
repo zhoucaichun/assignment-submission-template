@@ -1,0 +1,4 @@
+com\ecnu\pagerank\giraph\PageRankComputation.class
+com\ecnu\pagerank\mr\PageRankDriver.class
+com\ecnu\pagerank\mr\PageRankReducer.class
+com\ecnu\pagerank\mr\PageRankMapper.class
