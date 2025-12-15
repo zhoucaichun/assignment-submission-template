@@ -152,6 +152,24 @@ with open('roadNet-CA_json.txt') as f, open('roadNet_mr.txt', 'w') as out:
         except: pass"
 ```
 
+**补充：小数据的下载与转换命令**
+```bash
+# 1. 下载 random_graph_100.txt 数据集到本地
+hdfs dfs -get /giraph/input/random_graph_100.txt .
+
+# 2. 运行转换脚本 (生成 random100_mr.txt)
+# 注意：这里读取的是 random_graph_100.txt
+python3 -c "import json; 
+with open('random_graph_100.txt') as f, open('random100_mr.txt', 'w') as out:
+    for line in f:
+        try:
+            arr = json.loads(line); 
+            # 转换逻辑: ID \t PR \t Target1,Target2...
+            out.write(f'{arr[0]}\t{arr[1]}\t' + ','.join([str(x[0]) for x in arr[2]]) + '\n')
+        except: pass"
+```
+
+
 **2. 替换 HDFS 输入目录**
 ```bash
 # 1. 清空原有的 Stanford 数据 (不需要备份了，反正原文件还在 HDFS 其他地方)
@@ -647,6 +665,59 @@ if __name__ == "__main__":
 **第一步：准备数据文件**
 
 1.  去 Hadoop UI -\> Job -\> Map Tasks。
+```
+在 MapReduce PageRank 这种迭代算法中，选择哪一轮 Job 的数据至关重要，选错了会让你的结论完全站不住脚。
+**结论：请选择中间轮次（例如第 5 轮或第 6 轮）的 Job。**
+
+### 1. 为什么选“中间轮次”？
+
+* **避开冷启动（Job 1-2）**：前两轮迭代时，JVM 刚刚启动（Warm-up），缓存（Cache）还没热，而且可能有额外的数据加载开销。这时候的数据波动很大，不能代表算法的真实水平。
+* **避开收尾（Job 9-10）**：最后几轮虽然稳定，但有时会因为收敛检查（Convergence Check）或其他清理工作导致数据略有偏差。
+* **中间最稳（Job 5-6）**：这是**“稳态（Stable State）”**。此时 JVM 已经热身完毕，数据流稳定，最能反映调度策略（FIFO vs Fair）和数据倾斜（Straggler）的真实影响。
+
+### 2. 只有“第 5 轮”就够了吗？（进阶技巧）
+
+虽然选第 5 轮没问题，但为了防止这一轮恰好“运气爆棚”或者“运气极差”，最科学的做法是：
+
+1.  **快速扫视**：在 Hadoop UI 的 Job 列表中，看一眼第 4、5、6 轮的 `Elapsed Time`（总耗时）。
+2.  **排除异常**：如果第 5 轮用了 30s，而第 4、6 轮都用了 50s，那第 5 轮可能是异常值，**选那个耗时最接近平均水平的**。
+3.  **最终决定**：通常直接选 **Job 6** 是最保险的。
+
+### 3. 选择 Map Tasks 还是 Reduce Tasks？（关键！）
+
+你在提问中说“选中 Elapsed 那一整列... 去 Job -> Map Tasks”，**这里需要停一下确认瓶颈在哪里**。
+
+PageRank 在 MapReduce 中的长尾（Straggler）可能出现在 Map 阶段，也可能出现在 Reduce 阶段，取决于你的实现和图结构：
+
+* **如果 Map 阶段很慢（读数据慢）**：比如某个 Split 特别大。 -> **选 Map Tasks**。
+* **如果 Reduce 阶段很慢（Shuffle 慢/计算慢）**：比如某个“超级节点（Super Node）”有几百万条边，导致某个 Reducer 接收了 90% 的数据（数据倾斜）。 -> **选 Reduce Tasks**。
+
+**判断方法**：
+看 Job Overview 页面：
+* 如果 `Average Map Time` = 10s，`Average Reduce Time` = 50s —— **请去复制 Reduce Tasks 的时间！**（因为瓶颈在 Reduce，Straggler 肯定藏在那）。
+* 如果 Map 占大头，就复制 Map。
+
+### 4. 数据格式预警（必看！）
+
+你提到的复制内容包含 `1min 2sec` 和 `12sec`。
+**⚠️ 注意：** 你的 `analyze_stragglers.py` 脚本可能很简陋，不一定能读懂 "min" 和 "sec" 这种混合单位。
+
+* **如果脚本报错**：你可能需要手动把 `1min 2sec` 改成 `62`（秒），把 `12sec` 改成 `12`。
+* **Excel 小技巧**：先把数据粘贴到 Excel，用公式把它们统一转换成“秒”为单位的纯数字，然后再复制到 `mr_tasks.txt` 里。这样脚本运行绝对不会出问题。
+
+---
+
+### 📝 组员 C 的操作修正总结
+
+1.  打开 Hadoop UI，找到 **PageRank Iteration 6 (或者第 6 个 Job)**。
+2.  看一眼 Overview，确认是 **Map 慢** 还是 **Reduce 慢**。
+3.  点进慢的那个阶段（Tasks 列表）。
+4.  复制 **Elapsed Time** 列。
+5.  **清洗数据**：确保转成纯数字（秒），或者确认你的脚本能处理 "min/sec" 格式。
+6.  运行脚本：`python analyze_stragglers.py mr_tasks.txt`。
+
+这样做出来的 Straggler 分析，老师绝对挑不出毛病！
+```
 2.  鼠标选中 `Elapsed` 那一整列（比如有 50 行），复制。
 3.  在本地新建文件 `mr_tasks.txt`，粘贴进去。内容大概长这样：
     ```text
@@ -657,6 +728,7 @@ if __name__ == "__main__":
     ...
     ```
 4.  保存。
+
 
 **第二步：运行脚本**
 在终端（Terminal）输入：
