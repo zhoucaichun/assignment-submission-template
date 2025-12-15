@@ -576,7 +576,7 @@ def analyze_tasks(file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
     except FileNotFoundError:
-        print(f"❌ 错误: 找不到文件 '{file_path}'")
+        print(f"错误: 找不到文件 '{file_path}'")
         return
 
     # 解析数据
@@ -588,7 +588,7 @@ def analyze_tasks(file_path):
 
     count = len(durations)
     if count == 0:
-        print("⚠️ 文件中没有有效的时间数据。")
+        print("文件中没有有效的时间数据。")
         return
 
     # 计算统计指标
@@ -610,7 +610,7 @@ def analyze_tasks(file_path):
 
     # --- 输出报告 ---
     print("-" * 40)
-    print(f"📊 任务耗时分析报告: {file_path}")
+    print(f"任务耗时分析报告: {file_path}")
     print("-" * 40)
     print(f"总任务数 (Total Tasks):      {count}")
     print(f"平均耗时 (Average Time):     {avg_time:.2f} s")
@@ -618,13 +618,13 @@ def analyze_tasks(file_path):
     print(f"最快任务 (Min Time):         {min_time:.2f} s")
     print(f"最慢任务 (Max Time):         {max_time:.2f} s")
     print("-" * 40)
-    print(f"🐢 长尾阈值 (Avg * 1.5):      > {threshold:.2f} s")
-    print(f"🐢 长尾任务数 (Stragglers):   {straggler_count}")
-    print(f"🐢 长尾占比 (Percentage):     {straggler_percentage:.2f}%")
+    print(f"长尾阈值 (Avg * 1.5):      > {threshold:.2f} s")
+    print(f"长尾任务数 (Stragglers):   {straggler_count}")
+    print(f"长尾占比 (Percentage):     {straggler_percentage:.2f}%")
     print("-" * 40)
     
     # 简短结论建议
-    print("\n📝 [写进报告的建议]:")
+    print("\n[报告]:")
     if straggler_percentage > 5:
         print(f"  > 检测到明显的负载不均衡，长尾任务占比 {straggler_percentage:.1f}%。")
         print(f"  > 最慢任务耗时是最快任务的 {max_time/min_time:.1f} 倍，说明存在『木桶效应』。")
