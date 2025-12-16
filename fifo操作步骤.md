@@ -5,6 +5,7 @@
 
 -----
 ## ui界面开启history
+检查Hadoop服务状态
 ```bash
 # 01节点查看是否开启，看结果是否有JobHistoryServer
 jps
@@ -658,7 +659,7 @@ if __name__ == "__main__":
 
 -----
 
-### 2\. 使用方法实战 (组员 C 专用)
+### 2\. 使用方法实战
 
 假设你现在跑完了 **Medium 数据集 (Stanford) 的 MapReduce 作业**：
 
