@@ -23,7 +23,7 @@ mr-jobhistory-daemon.sh start historyserver
 1.  **编辑配置文件**
 
     ```bash
-    vim /usr/local/hadoop/etc/hadoop/yarn-site.xml
+    nano /usr/local/hadoop/etc/hadoop/yarn-site.xml
     ```
 
       * 找到 `<name>yarn.resourcemanager.scheduler.class</name>`。
@@ -31,8 +31,17 @@ mr-jobhistory-daemon.sh start historyserver
         ```xml
         <value>org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoScheduler</value>
         ```
-      * *保存退出：按 `Esc` -\> 输入 `:wq` -\> 回车。*
-
+      * 改完后按 Ctrl+O 保存，Enter 确认，Ctrl+X 退出
+      * ps:三种调度我已经在xml中备注好了
+    
+```bash 
+    # 发给 ecnu02
+    scp /usr/local/hadoop/etc/hadoop/yarn-site.xml root@ecnu02:/usr/local/hadoop/etc/hadoop/
+    # 发给 ecnu03
+    scp /usr/local/hadoop/etc/hadoop/yarn-site.xml root@ecnu03:/usr/local/hadoop/etc/hadoop/
+    # 发给 ecnu04
+    scp /usr/local/hadoop/etc/hadoop/yarn-site.xml root@ecnu04:/usr/local/hadoop/etc/hadoop/
+```
 2.  **重启 YARN 服务**
 
     ```bash
