@@ -76,11 +76,20 @@ mr-jobhistory-daemon.sh start historyserver
 
 4.  **01窗口准备mapreduce任务**
     ```bash
-    # 1. 清理输出目录
+    # 1. 彻底清理旧数据（好习惯）
     hdfs dfs -rm -r /giraph/output_mr
 
-    # 2. 提交 MapReduce 任务 (使用 Stanford 大数据集)
-    /usr/local/hadoop/bin/hadoop jar PageRank-ECNU-1.0-SNAPSHOT.jar com.ecnu.pagerank.mr.PageRankDriver
+    # 2. 运行任务
+    /usr/local/hadoop/bin/hadoop jar PageRank-ECNU-1.0-SNAPSHOT.jar \
+    com.ecnu.pagerank.mr.PageRankDriver \
+    -Dmapreduce.job.reduces=3 \
+    -Dmapreduce.map.memory.mb=3072 \
+    -Dmapreduce.map.java.opts=-Xmx2560m \
+    -Dmapreduce.reduce.memory.mb=3072 \
+    -Dmapreduce.reduce.java.opts=-Xmx2560m \
+    -Dmapreduce.task.io.sort.mb=512 \
+    /giraph/input/formatted_graph/roadNet_mr.txt \
+    /giraph/output_mr/iter_
     ```
 
 5.  **执行流程**
