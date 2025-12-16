@@ -88,7 +88,7 @@ mr-jobhistory-daemon.sh start historyserver
     -Dmapreduce.reduce.memory.mb=3072 \
     -Dmapreduce.reduce.java.opts=-Xmx2560m \
     -Dmapreduce.task.io.sort.mb=512 \
-    /giraph/input/formatted_graph/roadNet_mr.txt \
+    /giraph/input/formatted_graph/stanford_mr.txt \
     /giraph/output_mr/iter_
     ```
 
@@ -136,111 +136,54 @@ mr-jobhistory-daemon.sh start historyserver
 
 -----
 
-## 第四阶段 换大数据集RoadNet-CA重复第二和三阶段 
-* 因为数据集变大了（约 120MB），**MapReduce 的运行时间会显著变长**，请做好心理准备（可能需要 15-20 分钟）。
-* 同时，为了配合“写死”的 MapReduce 代码（输入数据的路径写死是String inputPath = "/giraph/input/formatted_graph"这个），保留了“腾笼换鸟”的策略，并针对新数据集更新了所有路径。
+## 第四阶段 换大数据集RoadNet和小数据集random100  重复第二和三阶段的实验 
 
-### 🦜 第一阶段：数据“腾笼换鸟” (在窗口 01节点)
-
-把新的 RoadNet 数据集转换格式，并放到 MapReduce 代码指定的输入路径里。
-
-**1. 下载并转换数据**
-
-```bash
-# 1. 下载 RoadNet 数据集到本地
-hdfs dfs -get /giraph/input/roadNet-CA_json.txt .
-
-# 2. 运行转换脚本 (生成 roadNet_mr.txt)
-# 注意：这里读取的是 roadNet-CA_json.txt
-python3 -c "import json; 
-with open('roadNet-CA_json.txt') as f, open('roadNet_mr.txt', 'w') as out:
-    for line in f:
-        try:
-            arr = json.loads(line); 
-            # 转换逻辑: ID \t PR \t Target1,Target2...
-            out.write(f'{arr[0]}\t{arr[1]}\t' + ','.join([str(x[0]) for x in arr[2]]) + '\n')
-        except: pass"
-```
-
-**补充：小数据的下载与转换命令**
-```bash
-# 1. 下载 random_graph_100.txt 数据集到本地
-hdfs dfs -get /giraph/input/random_graph_100.txt .
-
-# 2. 运行转换脚本 (生成 random100_mr.txt)
-# 注意：这里读取的是 random_graph_100.txt
-python3 -c "import json; 
-with open('random_graph_100.txt') as f, open('random100_mr.txt', 'w') as out:
-    for line in f:
-        try:
-            arr = json.loads(line); 
-            # 转换逻辑: ID \t PR \t Target1,Target2...
-            out.write(f'{arr[0]}\t{arr[1]}\t' + ','.join([str(x[0]) for x in arr[2]]) + '\n')
-        except: pass"
-```
-
-
-**2. 替换 HDFS 输入目录**
-```bash
-# 1. 清空原有的 Stanford 数据 (不需要备份了，反正原文件还在 HDFS 其他地方)
-hdfs dfs -rm -r /giraph/input/formatted_graph
-
-# 2. 重建目录
-hdfs dfs -mkdir -p /giraph/input/formatted_graph
-
-# 3. 上传转换好的 RoadNet 数据，伪装成 data.txt
-hdfs dfs -put roadNet_mr.txt /giraph/input/formatted_graph/data.txt
-
-# 4. 检查确认 (应该只看到这一个文件，大小约 100MB+)
-hdfs dfs -ls /giraph/input/formatted_graph/
-```
------
-### 🔄 第二阶段：MapReduce 性能监控 （同中等数据集的第二阶段）
+### 📣下面以大数据集为例子：
+### 1：跑MapReduce （同中等数据集）
 
 **准备工作**：
   * **窗口 03节点**：监控台
   * **窗口 01节点**：控制台
 
-**1. 启动监控 (03节点窗口)**
+**1️⃣. 启动监控 (03节点窗口)**
 
 ```bash
 dstat -tcmnd --output mr_roadNet_fifo.csv 1
 ```
 
-**2. 准备任务 (01节点窗口)**
-
+**2️⃣. 准备任务 (01节点窗口)**
+（注意修改input路径为了/input/formatted_graph/roadNet_mr.txt \）
 ```bash
-# 1. 清理输出目录 (MapReduce 还是输出到 output_mr)
-hdfs dfs -rm -r /giraph/output_mr
+    # 1. 彻底清理旧数据（好习惯）
+    hdfs dfs -rm -r /giraph/output_mr
 
-# 2. 提交任务 (它会自动读取刚才放进去的 roadNet 数据)
-/usr/local/hadoop/bin/hadoop jar PageRank-ECNU-1.0-SNAPSHOT.jar \
-com.ecnu.pagerank.mr.PageRankDriver \
--Dmapreduce.job.reduces=3 \
--Dmapreduce.map.memory.mb=3072 \
--Dmapreduce.map.java.opts=-Xmx2560m \
--Dmapreduce.reduce.memory.mb=3072 \
--Dmapreduce.reduce.java.opts=-Xmx2560m \
--Dmapreduce.task.io.sort.mb=512 \
-/giraph/input/formatted_graph/roadNet_mr.txt \
-/output_roadnet_mr
+    # 2. 运行任务
+    /usr/local/hadoop/bin/hadoop jar PageRank-ECNU-1.0-SNAPSHOT.jar \
+    com.ecnu.pagerank.mr.PageRankDriver \
+    -Dmapreduce.job.reduces=3 \
+    -Dmapreduce.map.memory.mb=3072 \
+    -Dmapreduce.map.java.opts=-Xmx2560m \
+    -Dmapreduce.reduce.memory.mb=3072 \
+    -Dmapreduce.reduce.java.opts=-Xmx2560m \
+    -Dmapreduce.task.io.sort.mb=512 \
+    /giraph/input/formatted_graph/roadNet_mr.txt \
+    /giraph/output_mr/iter_
 ```
-
-**3. 执行流程**
+**3️⃣. 执行流程**
 
   * 03节点回车 (开始监控) -\> 01节点回车 (提交任务) -\> **等待较长时间** (可能 \>10分钟) -\> 任务 Success -\> 03节点 `Ctrl+C`。
 
 -----
 
-### 🔄 第三阶段：Giraph 性能监控 （同中等数据集的第三阶段）
+### 2：跑Giraph （同中等数据集）
 
-**1. 启动监控 (03节点窗口)**
+**1️⃣. 启动监控 (03节点窗口)**
 
 ```bash
 dstat -tcmnd --output giraph_roadNet_fifo.csv 1
 ```
 
-**2. 提交任务 (01节点窗口)**
+**2️⃣. 提交任务 (01节点窗口)**
 *(注意：输入路径改为 `/giraph/input/roadNet-CA_json.txt`，输出路径改为 `output_giraph_roadNet`)*
 
 ```bash
@@ -265,7 +208,7 @@ com.ecnu.pagerank.giraph.PageRankComputation \
 -ca giraph.zkSessionMsecTimeout=600000
 ```
 
-**3. 执行流程**
+**3️⃣. 执行流程**
 
   * 03节点回车 -\> 01节点回车 -\> 等待 Success -\> 03节点 `Ctrl+C`。
 
@@ -370,7 +313,7 @@ com.ecnu.pagerank.giraph.PageRankComputation \
 *(注意：我也把输出目录改成了 `_v2`，避免冲突)*
 
 ---
-## 对于小数据集和大数据集只用W1，原因如下：
+## 对于小数据集和大数据集giraph只用W1，原因如下：
 ## 1、 小数据集的：
 ```python?code_reference&code_event_index=1
 import pandas as pd

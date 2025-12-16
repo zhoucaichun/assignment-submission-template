@@ -46,12 +46,13 @@ ssh root@106.15.248.68
 ```bash
 # 连接子节点1
 ssh root@ecnu02
-
+ssh root@139.196.240.167
 # 连接子节点2
 ssh root@ecnu03
-
+ssh root@139.224.227.56
 # 连接子节点3
 ssh root@ecnu04
+ssh root@47.116.114.140
 ```
 
 ### 2.2 工作目录
