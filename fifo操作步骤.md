@@ -205,7 +205,16 @@ dstat -tcmnd --output mr_roadNet_fifo.csv 1
 hdfs dfs -rm -r /giraph/output_mr
 
 # 2. 提交任务 (它会自动读取刚才放进去的 roadNet 数据)
-/usr/local/hadoop/bin/hadoop jar PageRank-ECNU-1.0-SNAPSHOT.jar com.ecnu.pagerank.mr.PageRankDriver
+/usr/local/hadoop/bin/hadoop jar PageRank-ECNU-1.0-SNAPSHOT.jar \
+com.ecnu.pagerank.mr.PageRankDriver \
+-Dmapreduce.job.reduces=3 \
+-Dmapreduce.map.memory.mb=3072 \
+-Dmapreduce.map.java.opts=-Xmx2560m \
+-Dmapreduce.reduce.memory.mb=3072 \
+-Dmapreduce.reduce.java.opts=-Xmx2560m \
+-Dmapreduce.task.io.sort.mb=512 \
+/giraph/input/formatted_graph/roadNet_mr.txt \
+/output_roadnet_mr
 ```
 
 **3. 执行流程**
