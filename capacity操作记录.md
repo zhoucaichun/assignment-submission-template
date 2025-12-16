@@ -325,4 +325,108 @@ com.ecnu.pagerank.giraph.PageRankComputation \
 -ca giraph.zkSessionMsecTimeout=600000
 
 ```
+----
+# 为什么会发生死锁
+这是一个非常深刻的问题。你遇到的死锁并非代码逻辑错误（比如 Java 里的 `synchronized` 死锁），而是分布式计算中特有的 **“资源死锁” (Resource Deadlock)**，学术上通常称为 **“群组调度 (Gang Scheduling) 问题”**。
+
+简单来说，就是：**“想凑一桌麻将，但只抢到了 3 个椅子，坐下的人不肯走，站着的人坐不下，大家就这样僵住了。”**
+
+我来为你深度复盘为什么在你的集群环境下，这个死锁一直发生：
+
+###1. 核心矛盾：Giraph 的“同进同退” vs YARN 的“先到先得”这起事故的根源在于 Giraph 和 MapReduce 的运行机制完全不同：
+
+* **MapReduce (独狼模式)**：
+* 假设你有 100 个 Map 任务，但集群只能同时跑 2 个。
+* 没关系！YARN 会先跑 2 个，跑完释放资源，再跑下 2 个。**只要有一点资源，任务就能慢慢挪完。**
+
+
+* **Giraph (团队模式)**：
+* Giraph 是基于 **BSP (整体同步并行)** 模型的。
+* 它要求：**所有的 Worker 必须同时在线，才能开始第一轮计算 (Superstep 0)。**
+* 如果你申请了 4 个 Worker，但 YARN 只给了你 3 个，那这 3 个 Worker 会原地待命，无限期等待第 4 个兄弟。它们**绝对不会**先开始干活。
+
+
+
+###2. 死锁现场还原 (The Trap)让我们回到你卡在 25% 进度的那个场景：
+
+* **你的需求**：你要 4 个容器（1 Master + 3 Worker），每个 4GB。总需求 **16GB**。
+* **集群现状**：假设集群总空闲资源只有 **8GB**。
+
+**死锁过程如下：**
+
+1. **分配开始**：YARN 看到有两个 4GB 的空位，于是先把 **Master** 和 **Worker 1** 启动了。
+2. **资源占用**：这两个容器立刻占用了 8GB 内存。此时，**集群空闲资源 = 0**。
+3. **无尽等待**：
+* **Master & Worker 1**：它们占着茅坑不拉屎，因为它们在等 Worker 2 和 Worker 3 上线才能开始同步。
+* **Worker 2 & Worker 3**：它们在排队等资源。但是资源被 Master 和 Worker 1 占着。
+
+
+4. **死局**：
+* Master 不释放资源，因为没算完。
+* 新资源进不来，因为 Master 不释放。
+* **结果：一直卡住 (Pending)，直到天荒地老。**
+
+
+
+###3. 为什么你的“多节点”尝试总失败？因为你的集群资源**太碎、太少**了。
+
+* **碎片化 (Fragmentation)**：
+* 你说集群里有“空闲资源”，但它们可能分散在不同机器上。
+* 如果有两台机器，A 剩 2GB，B 剩 2GB。虽然总共剩 4GB，但你**塞不进一个 4GB 的容器**（因为容器不能跨机器拆分）。
+
+
+* **Headroom (额度) 欺骗**：
+* 你看到的 `Headroom: <memory:2048>` 意味着你离死锁只有一步之遥。只要有一个容器启动稍微慢一点，或者有别的同学提交了一个小任务，资源链条瞬间断裂。
+
+
+
+###4. 为什么刚才的“终极方案”成功了？刚才我让你用的配置是：
+
+* **`-w 1` (单 Worker)**
+* **`SplitMasterWorker=false` (Master 不独占容器)**
+
+这个配置的精妙之处在于：**它打破了“凑桌子”的困境。**
+
+* **总需求**：只需要 **1 个** 容器（Master 和 Worker 合体）。
+* **逻辑**：只要 YARN 能给你分配 **1 个** 容器，这个容器自己既是裁判（Master）又是运动员（Worker）。
+* **结果**：人齐了（就它自己），直接开工！**根本不需要等待其他资源，所以永远不会死锁。**
+
+###📝 总结 (写进报告的加分项)> **关于资源死锁的分析：**
+> 在实验过程中，多次观察到 Giraph 任务卡滞在启动阶段（Map 25%）。经分析，这是典型的**资源死锁 (Resource Deadlock)** 现象。
+> **成因**：Giraph 采用 BSP 模型，要求所有 Worker 容器必须**同时**获得资源并从 Barrier（同步屏障）启动。当集群可用资源小于作业总资源需求时，部分容器（如 Master）会抢占并锁定资源，等待剩余容器启动；而剩余容器因资源被锁定无法分配，导致循环等待。
+> **解决**：通过将作业配置降级为单 Worker 模式 (`-w 1`) 并关闭 Master 独占 (`SplitMasterWorker=false`)，将原子资源需求降低为 1 个容器，从而彻底规避了多容器间的资源依赖死锁。
+
+
+
+----
+# 小数据集 worker3——1G 跑
+针对这个只有 **6.9KB (6984 bytes)** 的超小数据集 `random_graph_100.txt`，我们可以把配置降到最低，这样任务启动最快，且完全不会占用集群资源。
+ **3 个 Worker** 来验证分布式逻辑
+
+###运行命令 (极速版)对于 7KB 的数据，**1GB 内存** 都是杀鸡用牛刀了，但这是 Hadoop 的最小单位。
+
+```bash
+# 1. 清理输出
+hdfs dfs -rm -r /giraph/output_random_100
+
+# 2. 提交任务 (3 Worker, 最小内存)
+/usr/local/hadoop/bin/hadoop jar /root/giraph/giraph/giraph-examples/target/giraph-examples-1.3.0-SNAPSHOT-for-hadoop-2.7.3-jar-with-dependencies.jar \
+org.apache.giraph.GiraphRunner \
+-Dmapreduce.framework.name=yarn \
+-Dmapreduce.jobtracker.address=ecnu01:8032 \
+-Dmapreduce.map.memory.mb=1024 \
+-Dmapreduce.map.java.opts=-Xmx900m \
+com.ecnu.pagerank.giraph.PageRankComputation \
+-vif org.apache.giraph.io.formats.JsonLongDoubleFloatDoubleVertexInputFormat \
+-vip /giraph/input/random_graph_100.txt \
+-vof org.apache.giraph.io.formats.IdWithValueTextOutputFormat \
+-op /giraph/output_random_100 \
+-w 3 \
+-ca giraph.SplitMasterWorker=true \
+-ca giraph.zkSessionMsecTimeout=600000
+
+```
+###💡 参数解释* **`-Dmapreduce.map.memory.mb=1024`**: 只申请 1GB 内存。因为数据才 7KB，给多了浪费。
+* **`-w 3`**: 强行把这 7KB 数据切成 3 份给 3 个节点跑（虽然每个节点只分到 2KB 数据，但这正是验证“分布式”逻辑最好的微型实验）。
+* **总资源消耗**: 4 个容器 x 1GB = **4GB**。这在你的集群里应该能轻松跑起来，秒级完成。
 
