@@ -1,4 +1,5 @@
 
+
 # FIFO 调度策略对比实验
 
 **实验目标**：切换 Hadoop YARN 调度器为 **FIFO (先进先出)**，在同等数据集下重复 MapReduce 与 Giraph 的性能监控，并进行并发“排头阻塞”测试。
@@ -234,6 +235,29 @@ com.ecnu.pagerank.giraph.PageRankComputation \
 -ca giraph.SplitMasterWorker=true \
 -ca giraph.zkSessionMsecTimeout=600000
 ```
+
+```bash
+#补充小数据集的giraph命令
+# 1. 设置环境变量
+export HADOOP_CLASSPATH=$HADOOP_CLASSPATH:/root/PageRank-ECNU-1.0-SNAPSHOT.jar
+
+# 2. 清理输出目录
+hdfs dfs -rm -r /giraph/output_giraph_random100
+# 3.跑实验
+/usr/local/hadoop/bin/hadoop jar /root/giraph/giraph/giraph-examples/target/giraph-examples-1.3.0-SNAPSHOT-for-hadoop-2.7.3-jar-with-dependencies.jar \
+org.apache.giraph.GiraphRunner \
+-Dmapreduce.framework.name=yarn \
+-Dmapreduce.jobtracker.address=ecnu01:8032 \
+com.ecnu.pagerank.giraph.PageRankComputation \
+-vif org.apache.giraph.io.formats.JsonLongDoubleFloatDoubleVertexInputFormat \
+-vip /giraph/input/random_graph_100.txt \
+-vof org.apache.giraph.io.formats.IdWithValueTextOutputFormat \
+-op /giraph/output_giraph_random100 \
+-w 3 \
+-ca giraph.SplitMasterWorker=true \
+-ca giraph.zkSessionMsecTimeout=600000
+```
+
 
 **3️⃣. 执行流程**
 
