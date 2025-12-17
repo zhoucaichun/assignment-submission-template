@@ -1,5 +1,5 @@
 # 大数据集进行giraph内存不足
-## 运行的代码是：
+## worker3_default运行的代码是：
 ```bash
 # 1. 设置环境变量
 export HADOOP_CLASSPATH=$HADOOP_CLASSPATH:/root/PageRank-ECNU-1.0-SNAPSHOT.jar

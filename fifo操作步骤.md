@@ -178,6 +178,24 @@ dstat -tcmnd --output mr_roadNet_fifo.csv 1
     /giraph/input/formatted_graph/roadNet_mr.txt \
     /giraph/output_mr/iter_
 ```
+```bash
+    ##补充  小数据集的代码
+    # 1. 彻底清理旧数据
+    hdfs dfs -rm -r /giraph/output_mr
+
+    # 2. 运行任务
+    /usr/local/hadoop/bin/hadoop jar PageRank-ECNU-1.0-SNAPSHOT.jar \
+    com.ecnu.pagerank.mr.PageRankDriver \
+    -Dmapreduce.job.reduces=3 \
+    -Dmapreduce.map.memory.mb=3072 \
+    -Dmapreduce.map.java.opts=-Xmx2560m \
+    -Dmapreduce.reduce.memory.mb=3072 \
+    -Dmapreduce.reduce.java.opts=-Xmx2560m \
+    -Dmapreduce.task.io.sort.mb=512 \
+    /giraph/input/formatted_graph/random100_mr.txt \
+    /giraph/output_mr/iter_
+```
+
 **3️⃣. 执行流程**
 
   * 03节点回车 (开始监控) -\> 01节点回车 (提交任务) -\> **等待较长时间** (可能 \>10分钟) -\> 任务 Success -\> 03节点 `Ctrl+C`。
@@ -202,7 +220,7 @@ export HADOOP_CLASSPATH=$HADOOP_CLASSPATH:/root/PageRank-ECNU-1.0-SNAPSHOT.jar
 # 2. 清理输出目录
 hdfs dfs -rm -r /giraph/output_giraph_roadNet
 
-# 3. 提交 Giraph 任务
+# 3. 提交 Giraph 任务 worker3_defaultS
 /usr/local/hadoop/bin/hadoop jar /root/giraph/giraph/giraph-examples/target/giraph-examples-1.3.0-SNAPSHOT-for-hadoop-2.7.3-jar-with-dependencies.jar \
 org.apache.giraph.GiraphRunner \
 -Dmapreduce.framework.name=yarn \
