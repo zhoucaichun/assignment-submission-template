@@ -1,4 +1,4 @@
-# 大数据集进行giraph内存不足
+# capacity同fifo 大数据集进行giraph内存不足
 ## worker3_default运行的代码是：
 ```bash
 # 1. 设置环境变量
@@ -406,10 +406,13 @@ com.ecnu.pagerank.giraph.PageRankComputation \
 ###运行命令 (极速版)对于 7KB 的数据，**1GB 内存** 都是杀鸡用牛刀了，但这是 Hadoop 的最小单位。
 
 ```bash
-# 1. 清理输出
+# 1. 设置环境变量
+export HADOOP_CLASSPATH=$HADOOP_CLASSPATH:/root/PageRank-ECNU-1.0-SNAPSHOT.jar
+
+# 2. 清理输出
 hdfs dfs -rm -r /giraph/output_random_100
 
-# 2. 提交任务 (3 Worker, 最小内存)
+# 3. 提交任务 (3 Worker, 最小内存)
 /usr/local/hadoop/bin/hadoop jar /root/giraph/giraph/giraph-examples/target/giraph-examples-1.3.0-SNAPSHOT-for-hadoop-2.7.3-jar-with-dependencies.jar \
 org.apache.giraph.GiraphRunner \
 -Dmapreduce.framework.name=yarn \

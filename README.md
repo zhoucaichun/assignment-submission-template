@@ -61,17 +61,117 @@
 
 *(此处待补充：Master 和 Slave 节点的 jps 运行截图)*
 
-#### 二、 实验设计
+#### 实验设计与执行策略
 
+本实验旨在多维度评估 Giraph (BSP) 与 MapReduce 在不同资源环境下的行为差异。为了全面捕捉性能特征，我们设计了 **3×3×2** 的实验矩阵（3种调度器 × 3种数据集 × 2种框架），并针对 FIFO 调度器增加了特定的并发阻塞测试。
 
-#### 三、 MapReduce PageRank 实验
+**1. 为什么要测试三种调度器？**
+* **FIFO (先进先出)**：作为基准对照，验证在大作业独占资源时，BSP 框架是否会加剧集群的“排头阻塞”效应。
+* **Capacity (容量调度)**：模拟 Hadoop 生产环境的默认配置，重点考察在资源受限（Container 额度固定）时，Giraph 的“群组调度”机制是否容易引发资源死锁。
+* **Fair (公平调度)**：探究在多任务竞争环境下，动态资源分配能否缓解 Giraph 的长尾效应（Straggler）及内存碎片问题。
 
-**1. 算法编译与打包**
-在本地开发环境使用 Maven 编译 MapReduce 实现代码，生成 Jar 包。
+**2. 为什么要进行“并发阻塞”测试？**
+单纯的单任务运行无法反映分布式系统的真实负载。通过“先提交大作业，后提交小作业”的测试，可以直观地证明不同调度器对作业等待时间（Wait Time）的影响，特别是验证 Giraph 这种长期占用容器的框架对后续 MR 短作业的阻塞程度。
 
-```bash
-mvn clean package
-```
+---
+
+#### 关键实验步骤
+
+实验分为环境准备、MapReduce 基准测试、Giraph 深度测试（含参数调优与死锁排查）、以及调度器特性测试四个阶段。
+
+**第一阶段：环境与服务检查**
+
+在所有实验开始前，必须在 Master 节点 (`ecnu01`) 检查 HDFS 和 YARN 服务状态，确保所有 Slave 节点正常在线，避免因节点掉线导致的实验误差。
+
+* **命令**：`jps`
+* **预期结果**：
+    * Master 节点包含：`ResourceManager`, `NameNode`, `JobHistoryServer`
+    * Slave 节点包含：`NodeManager`, `DataNode`
+
+![Master 和 Slave 节点的 jps 运行截图]
+
+**第二阶段：环境监控部署**
+
+为了获取秒级的性能波动数据（用于生成波形图），需在 Slave 节点部署监控工具。
+
+1.  **开启 History Server**：在 Master 节点执行 `mr-jobhistory-daemon.sh start historyserver`，确保所有作业的 Counter 指标（如 CPU Time, Bytes Read）可追溯。
+2.  **部署 dstat**：在 Slave 节点（如 `ecnu03`）运行以下命令，采集 CPU 脉冲（验证 BSP 同步）与磁盘 I/O（验证 MR Shuffle）。
+    ```bash
+    dstat -tcmnd --output [Dataset]_[Scheduler]_[Framework].csv 1
+    ```
+
+**第三阶段：MapReduce 性能测试 (Baseline)**
+
+针对 Small (`random_100`), Medium (`web-Stanford`), Large (`roadNet-CA`) 三个数据集，分别提交 MapReduce 作业。
+
+1.  **启动监控**：在 Slave 节点启动 `dstat`。
+2.  **清理环境**：每次运行前执行 `hdfs dfs -rm -r /giraph/output_mr` 确保输出目录净空。
+3.  **提交作业与参数配置**：
+    为了保证性能可比性并防止默认内存过小导致频繁 GC，我们显式设置了内存参数。
+    * **通用参数配置**：
+        * `mapreduce.job.reduces`: 3
+        * `mapreduce.map.memory.mb`: 3072 (3GB)
+        * `mapreduce.map.java.opts`: -Xmx2560m
+        * `mapreduce.reduce.memory.mb`: 3072 (3GB)
+        * `mapreduce.reduce.java.opts`: -Xmx2560m
+        * `mapreduce.task.io.sort.mb`: 512
+4.  **停止监控**：作业 Success 后停止 `dstat` 并保存生成的 CSV 文件。
+
+**第四阶段：Giraph 性能测试与调优 (Core)**
+
+Giraph 对内存和容器数量极其敏感。在实验过程中，针对不同规模的数据集，我们采取了不同的运行策略以解决资源死锁与 OOM 问题。
+
+**1. 小数据集 (random_100) 的微型分布式验证**
+* **目的**：验证即使是只有 7KB 的微小数据，Giraph 也能通过多 Worker 运行（验证分布式通信逻辑），但会观察到较大的系统协调开销。
+* **配置策略**：使用最小化内存配置，避免占用过多资源。
+* **命令参数**：
+    * **Worker 数量**：`-w 3`
+    * **内存**：`-Dmapreduce.map.memory.mb=1024` (1GB)
+    * **Master/Worker 分离**：`-ca giraph.SplitMasterWorker=true`
+    * **JVM Heap**：`-Dmapreduce.map.java.opts=-Xmx900m`
+
+**2. 中数据集 (web-Stanford) 的标准测试**
+* **配置**：使用标准分布式配置。
+    * **Worker 数量**：`-w 3`
+    * **Master/Worker 分离**：`-ca giraph.SplitMasterWorker=true`
+* **目的**：验证 BSP 模型在多节点间的同步屏障特征（网络脉冲）。
+
+**3. 大数据集 (roadNet-CA) 的死锁排查与终极调优**
+在 Capacity 和 Fair 调度器下运行大图时，遭遇了严重的资源瓶颈，排查过程如下：
+
+* **故障 A (OOM)**：
+    * **现象**：使用默认内存参数时，日志报错 `OutOfMemoryError: Java heap space`。
+    * **分析**：RoadNet 需加载全量图数据进内存，默认 1GB Container 无法承载。
+    * **修正**：增加内存参数至 `-Dmapreduce.map.memory.mb=4096`。
+
+* **故障 B (资源死锁 Resource Deadlock)**：
+    * **现象**：增加内存后，使用 `-w 3` 提交，任务卡在 map 25% (或 67%) 进度不动。查看日志发现 `Headroom: <memory:0>`。
+    * **分析**：YARN 集群总资源有限。Master 容器启动后占用了资源，导致剩余资源不足以启动所需的 3 个 Worker。Master 等 Worker 启动，Worker 等资源释放，形成循环等待（死锁）。
+
+* **最终方案 (Final Solution) —— 单兵作战策略**：
+    * **原理**：将作业原子需求降低为 **1 个容器**。只要能申请到一个容器，Master 和 Worker 就在同一进程内运行，彻底规避了分布式资源死锁。
+    * **最终命令配置**：
+        * **内存**：`-Dmapreduce.map.memory.mb=4096` (4GB)
+        * **Worker 数量**：`-w 1`
+        * **Master/Worker 合并**：`-ca giraph.SplitMasterWorker=false` (关键参数)
+
+**第五阶段：调度器特性测试**
+
+**1. 切换调度器**
+1.  修改 `yarn-site.xml` 中的 `yarn.resourcemanager.scheduler.class` 属性（分别设置为 `FifoScheduler`, `CapacityScheduler`, `FairScheduler`）。
+2.  使用 `scp` 分发配置文件至所有 Slave 节点。
+3.  重启 YARN 服务：`stop-yarn.sh` -> `start-yarn.sh`。
+
+**2. 执行并发阻塞测试 (仅 FIFO 模式)**
+* **步骤**：
+    1.  开启两个终端窗口。
+    2.  **窗口 A**：提交一个长耗时的 Giraph 大作业（配置参考第四阶段的大数据集最终方案）。
+    3.  **窗口 B**：等待约 10 秒后，立即提交一个 MapReduce 小作业。
+* **观测点**：
+    1.  刷新 YARN Web UI (`http://MasterIP:8088`)。
+    2.  **关键现象**：记录 MapReduce 任务状态长时间处于 `ACCEPTED`（而非 `RUNNING`），且进度条停滞，直到 Giraph 任务彻底完成后，MR 任务才瞬间开始执行。
+    3.  **取证**：对包含两个任务状态的界面进行截图。
+* **结论**：验证了 FIFO 调度器缺乏资源抢占机制，存在严重的排头阻塞问题。
 
 #### 四、 Giraph PageRank 实验
 
