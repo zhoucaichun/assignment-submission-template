@@ -109,7 +109,6 @@ mr-jobhistory-daemon.sh start historyserver
 -----
 
 ## 第三阶段：Giraph 性能监控 (FIFO版)
-
 1.  **启动监控 (03节点窗口)**
 
     ```bash

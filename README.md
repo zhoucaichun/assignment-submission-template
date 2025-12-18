@@ -50,56 +50,42 @@
     * **格式**：JSON 格式，`[顶点ID, 顶点值, [[目标顶点ID1, 边权重1], ...]]`。
     * **用途**：作为 Giraph 框架的标准输入，同时用于对比两种框架在大规模迭代下的运行时长。
 
-### 实验步骤
+### 实验设计与步骤
 列出执行实验的关键步骤，并对关键步骤进行截图，如 MapReduce / Spark / Flink 部署成功后的进程信息、作业执行成功的信息等，**截图能够通过显示用户账号等个性化信息佐证实验的真实性**。
-#### 一、 环境与服务检查
 
-在 Master 节点 (`ecnu01`) 检查 HDFS 和 YARN 服务状态，确保所有 Slave 节点正常在线。
-
-- 命令：`jps`
-- 预期：Master 节点包含 `ResourceManager`, `NameNode`；Slave 节点包含 `NodeManager`, `DataNode`。
-
-*(此处待补充：Master 和 Slave 节点的 jps 运行截图)*
-
-#### 实验设计与执行策略
+#### 实验设计
 
 本实验旨在多维度评估 Giraph (BSP) 与 MapReduce 在不同资源环境下的行为差异。为了全面捕捉性能特征，我们设计了 **3×3×2** 的实验矩阵（3种调度器 × 3种数据集 × 2种框架），并针对 FIFO 调度器增加了特定的并发阻塞测试。
 
-**1. 为什么要测试三种调度器？**
+ **1. 使用三种调度器**
 * **FIFO (先进先出)**：作为基准对照，验证在大作业独占资源时，BSP 框架是否会加剧集群的“排头阻塞”效应。
 * **Capacity (容量调度)**：模拟 Hadoop 生产环境的默认配置，重点考察在资源受限（Container 额度固定）时，Giraph 的“群组调度”机制是否容易引发资源死锁。
 * **Fair (公平调度)**：探究在多任务竞争环境下，动态资源分配能否缓解 Giraph 的长尾效应（Straggler）及内存碎片问题。
 
-**2. 为什么要进行“并发阻塞”测试？**
-单纯的单任务运行无法反映分布式系统的真实负载。通过“先提交大作业，后提交小作业”的测试，可以直观地证明不同调度器对作业等待时间（Wait Time）的影响，特别是验证 Giraph 这种长期占用容器的框架对后续 MR 短作业的阻塞程度。
+**2. FIFO进行“并发阻塞”测试**
+ 单纯的单任务运行无法反映分布式系统的真实负载。通过“先提交大作业，后提交小作业”的测试，可以直观地证明不同调度器对作业等待时间（Wait Time）的影响，特别是验证 Giraph 这种长期占用容器的框架对后续 MR 短作业的阻塞程度。
 
----
-
-#### 关键实验步骤
-
+#### 实验步骤
 实验分为环境准备、MapReduce 基准测试、Giraph 深度测试（含参数调优与死锁排查）、以及调度器特性测试四个阶段。
 
-**第一阶段：环境与服务检查**
+**数据集介绍**
+```
+ input_json.txt     roadNet-CA_json.txt    roadNet_mr.txt          random100_mr.txt     stanford_input_json.txt             random_graph_100.txt
+```
+
+**第一阶段：环境准备**
 
 在所有实验开始前，必须在 Master 节点 (`ecnu01`) 检查 HDFS 和 YARN 服务状态，确保所有 Slave 节点正常在线，避免因节点掉线导致的实验误差。
-
 * **命令**：`jps`
-* **预期结果**：
-    * Master 节点包含：`ResourceManager`, `NameNode`, `JobHistoryServer`
-    * Slave 节点包含：`NodeManager`, `DataNode`
-
-![Master 和 Slave 节点的 jps 运行截图]
+* **结果截图**：![1766050794916](image/README/1766050794916.png)
 
 **第二阶段：环境监控部署**
-
 为了获取秒级的性能波动数据（用于生成波形图），需在 Slave 节点部署监控工具。
-
 1.  **开启 History Server**：在 Master 节点执行 `mr-jobhistory-daemon.sh start historyserver`，确保所有作业的 Counter 指标（如 CPU Time, Bytes Read）可追溯。
-2.  **部署 dstat**：在 Slave 节点（如 `ecnu03`）运行以下命令，采集 CPU 脉冲（验证 BSP 同步）与磁盘 I/O（验证 MR Shuffle）。
+2.  **部署 dstat**：在 Slave 节点（本实验使用 `ecnu03`）运行以下命令，采集 CPU 脉冲（验证 BSP 同步）与磁盘 I/O（验证 MR Shuffle）。
     ```bash
     dstat -tcmnd --output [Dataset]_[Scheduler]_[Framework].csv 1
     ```
-
 **第三阶段：MapReduce 性能测试 (Baseline)**
 
 针对 Small (`random_100`), Medium (`web-Stanford`), Large (`roadNet-CA`) 三个数据集，分别提交 MapReduce 作业。
