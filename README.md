@@ -10,17 +10,19 @@
 比较 Giraph 和 MapReduce 运行 PageRank 算法的差异
 
 ## 研究内容
-1. 对比分析 Giraph 和 MapReduce 在执行 PageRank 算法等图迭代计算任务时的差异。
-2. 深入理解 Giraph 所采用的 BSP (Bulk Synchronous Parallel) 设计理念及其在图计算中的优势。
-3. 重点探讨两者在数据通信方式、任务调度机制及迭代开销等方面的不同，以及这些差异对算法性能与可扩展性的影响。
-**增加的研究内容：**
+1.  **算法与模型对比**：对比分析 Giraph (基于内存的 BSP 模型) 和 MapReduce (基于磁盘 Shuffle 的 MR 模型) 在执行 PageRank 等图迭代计算任务时的编程范式与数据流差异。
+2.  **性能与资源效率分析**：深入探究两者在**数据通信方式**（消息传递 vs 磁盘IO）、**同步机制**（Superstep 同步屏障 vs 阶段性 Shuffle）及**迭代开销**方面的不同，量化分析这些差异对作业执行时间、CPU 利用率及网络吞吐量的影响。
+3.  **调度策略与资源竞争研究**：结合 YARN 的三种调度器（FIFO, Capacity, Fair），探讨不同资源分配策略对长时运行的图计算作业（Giraph）与短作业（MapReduce）共存时的影响，重点分析**排头阻塞 (Head-of-line blocking)** 现象及多租户环境下的资源竞争问题。
+4.  **系统稳定性与可扩展性探讨**：针对分布式环境下的**资源死锁 (Resource Deadlock)** 与内存溢出 (OOM) 问题进行实验排查，分析 Giraph 在受限资源下的容器分配机制及其调优策略。
 
 ## 实验
-1. 分别基于Giraph和MapReduce实现PageRank算法，从编程模型角度分析两种系统在算法表达与数据流处理方式上的差异。
-2. 在不同规模的图数据集上运行实验，记录作业执行时间、网络通信量以及内存占用等指标，对比分析Giraph与MapReduce在图迭代计算中的性能表现。
+1.  **算法实现**：分别基于 Giraph 和 MapReduce 框架实现 PageRank 算法，验证分布式计算逻辑的正确性。
+2.  **多维性能评估**：构建“不同数据规模 × 不同计算框架”的实验矩阵，宏观对比两者在作业执行效率、内存占用及网络 I/O 特征上的差异。
+3.  **调度特性测试**：模拟高并发与资源抢占场景，评估 FIFO、Capacity 和 Fair 三种调度器在处理长短作业混合负载时的表现及资源隔离效果。
+4.  **瓶颈分析与调优**：针对大图计算过程中出现的内存溢出与死锁现象进行诊断，验证关键参数调优对系统稳定性的影响。
 
 ### 实验环境
-#### 硬件配置
+#### 1. 硬件配置
 本次实验部署在分布式集群上，包含 **1 个主节点** 和 **3 个子节点**，满足节点数 (>=3) 的要求。
 * **节点拓扑**：
     * **Master**: `ecnu01` (NameNode, ResourceManager)
@@ -32,7 +34,7 @@
     * **网络带宽**: 100 Mbps (峰值)
     * **区域**: 华东2 (上海) 可用区 B
 
-#### 软件配置
+#### 2. 软件配置
 * **操作系统**：Linux
 * **JDK 版本**：Java 8 OpenJDK
 * **Hadoop 版本**：2.7.3 (HDFS + YARN)
@@ -58,34 +60,59 @@
 本实验旨在多维度评估 Giraph (BSP) 与 MapReduce 在不同资源环境下的行为差异。为了全面捕捉性能特征，我们设计了 **3×3×2** 的实验矩阵（3种调度器 × 3种数据集 × 2种框架），并针对 FIFO 调度器增加了特定的并发阻塞测试。
 
  **1. 使用三种调度器**
-* **FIFO (先进先出)**：作为基准对照，验证在大作业独占资源时，BSP 框架是否会加剧集群的“排头阻塞”效应。
-* **Capacity (容量调度)**：模拟 Hadoop 生产环境的默认配置，重点考察在资源受限（Container 额度固定）时，Giraph 的“群组调度”机制是否容易引发资源死锁。
+* **FIFO (先进先出)**：作为基准对照，验证在大作业独占资源时，BSP 框架是否会加剧集群的排头阻塞效应。
+* **Capacity (容量调度)**：模拟 Hadoop 生产环境的默认配置，重点考察在资源受限（Container 额度固定）时，Giraph 的群组调度机制是否容易引发资源死锁。
 * **Fair (公平调度)**：探究在多任务竞争环境下，动态资源分配能否缓解 Giraph 的长尾效应（Straggler）及内存碎片问题。
 
-**2. FIFO进行“并发阻塞”测试**
- 单纯的单任务运行无法反映分布式系统的真实负载。通过“先提交大作业，后提交小作业”的测试，可以直观地证明不同调度器对作业等待时间（Wait Time）的影响，特别是验证 Giraph 这种长期占用容器的框架对后续 MR 短作业的阻塞程度。
+**2. FIFO进行“并发阻塞测试**
+ 单纯的单任务运行无法反映分布式系统的真实负载。通过先提交大作业，后提交小作业的测试，可以直观地证明不同调度器对作业等待时间（Wait Time）的影响，特别是验证 Giraph 这种长期占用容器的框架对后续 MR 短作业的阻塞程度。
 
 #### 实验步骤
-实验分为环境准备、MapReduce 基准测试、Giraph 深度测试（含参数调优与死锁排查）、以及调度器特性测试四个阶段。
+实验分为环境准备、环境监控部署、MapReduce 性能测试、Giraph 性能测试与调优、以及调度器特性测试五个阶段。
 
 **数据集介绍**
-```
- input_json.txt     roadNet-CA_json.txt    roadNet_mr.txt          random100_mr.txt     stanford_input_json.txt             random_graph_100.txt
-```
+- **DataSet 1——小数据集：合成数据random_100（随机图）**
+    - **节点数**：100
+    - **边数**：440
+    - **特点**： 
+        - 中等稀疏图
+        - 节点负载接近均匀
+        - 调度器差异不明显（baseline）
+
+- **DataSet 2——中数据集：web-Stanford（最经典 PageRank）**
+    - **来源**：Stanford SNAP
+    - **节点数**：≈ 281,903
+    - **边数**：≈ 2,312,497
+    - **特点**：
+        - 真实网页链接图
+        - 幂律分布，适合观察straggler
+        - 用于评估调度器在中等规模、强不均匀入度分布下的表现。
+
+- **DataSet 3——大数据集：roadNet-CA（稀疏图，对照用）** 
+
+    - **节点数**：≈ 1,965,206
+    - **边数**：≈ 5,533,214
+    - **特点**：
+        - 非常稀疏
+        - 度分布相对均匀
+        - 用于验证在“负载均匀场景”下，不同调度机制性能差异较小。
 
 **第一阶段：环境准备**
 
-在所有实验开始前，必须在 Master 节点 (`ecnu01`) 检查 HDFS 和 YARN 服务状态，确保所有 Slave 节点正常在线，避免因节点掉线导致的实验误差。
+在所有实验开始前，在 Master 节点 (`ecnu01`) 检查 HDFS 和 YARN 服务状态，确保所有 Slave 节点正常在线，避免因节点掉线导致的实验误差。
 * **命令**：`jps`
 * **结果截图**：![1766050794916](image/README/1766050794916.png)
 
 **第二阶段：环境监控部署**
 为了获取秒级的性能波动数据（用于生成波形图），需在 Slave 节点部署监控工具。
 1.  **开启 History Server**：在 Master 节点执行 `mr-jobhistory-daemon.sh start historyserver`，确保所有作业的 Counter 指标（如 CPU Time, Bytes Read）可追溯。
-2.  **部署 dstat**：在 Slave 节点（本实验使用 `ecnu03`）运行以下命令，采集 CPU 脉冲（验证 BSP 同步）与磁盘 I/O（验证 MR Shuffle）。
-    ```bash
+2.  **部署 dstat**：在 Slave 节点（本实验选取典型活跃节点 ecnu03）运行以下命令，采集 CPU 脉冲（验证 BSP 同步）与磁盘 I/O（验证 MR Shuffle）。
+```bash
     dstat -tcmnd --output [Dataset]_[Scheduler]_[Framework].csv 1
-    ```
+ ```
+ - 注：经预测试，如下图中数据集mapreduce实验监测结果图，集群中各活跃 Worker 节点（02蓝色、03绿色）虽在微观上的波峰波谷可能存在相位差，但在宏观的资源消耗量级和模式上是对称的，负载特征具有高度一致性。因此监测单个代表性节点即可满足实验对波形特征的采集需求，无需全节点开启。
+ ![1766321082302](image/README/1766321082302.png)
+    
 **第三阶段：MapReduce 性能测试 (Baseline)**
 
 针对 Small (`random_100`), Medium (`web-Stanford`), Large (`roadNet-CA`) 三个数据集，分别提交 MapReduce 作业。
@@ -103,7 +130,7 @@
         * `mapreduce.task.io.sort.mb`: 512
 4.  **停止监控**：作业 Success 后停止 `dstat` 并保存生成的 CSV 文件。
 
-**第四阶段：Giraph 性能测试与调优 (Core)**
+**第四阶段：Giraph 性能测试与调优**
 
 Giraph 对内存和容器数量极其敏感。在实验过程中，针对不同规模的数据集，我们采取了不同的运行策略以解决资源死锁与 OOM 问题。
 
@@ -122,7 +149,7 @@ Giraph 对内存和容器数量极其敏感。在实验过程中，针对不同�
     * **Master/Worker 分离**：`-ca giraph.SplitMasterWorker=true`
 * **目的**：验证 BSP 模型在多节点间的同步屏障特征（网络脉冲）。
 
-**3. 大数据集 (roadNet-CA) 的死锁排查与终极调优**
+**3. 大数据集 (roadNet-CA) 的死锁排查与调优**
 在 Capacity 和 Fair 调度器下运行大图时，遭遇了严重的资源瓶颈，排查过程如下：
 
 * **故障 A (OOM)**：
@@ -134,7 +161,7 @@ Giraph 对内存和容器数量极其敏感。在实验过程中，针对不同�
     * **现象**：增加内存后，使用 `-w 3` 提交，任务卡在 map 25% (或 67%) 进度不动。查看日志发现 `Headroom: <memory:0>`。
     * **分析**：YARN 集群总资源有限。Master 容器启动后占用了资源，导致剩余资源不足以启动所需的 3 个 Worker。Master 等 Worker 启动，Worker 等资源释放，形成循环等待（死锁）。
 
-* **最终方案 (Final Solution) —— 单兵作战策略**：
+* **最终解决**：
     * **原理**：将作业原子需求降低为 **1 个容器**。只要能申请到一个容器，Master 和 Worker 就在同一进程内运行，彻底规避了分布式资源死锁。
     * **最终命令配置**：
         * **内存**：`-Dmapreduce.map.memory.mb=4096` (4GB)
@@ -144,9 +171,9 @@ Giraph 对内存和容器数量极其敏感。在实验过程中，针对不同�
 **第五阶段：调度器特性测试**
 
 **1. 切换调度器**
-1.  修改 `yarn-site.xml` 中的 `yarn.resourcemanager.scheduler.class` 属性（分别设置为 `FifoScheduler`, `CapacityScheduler`, `FairScheduler`）。
-2.  使用 `scp` 分发配置文件至所有 Slave 节点。
-3.  重启 YARN 服务：`stop-yarn.sh` -> `start-yarn.sh`。
+- 修改 `yarn-site.xml` 中的 `yarn.resourcemanager.scheduler.class` 属性（分别设置为 `FifoScheduler`, `CapacityScheduler`, `FairScheduler`）。
+- 使用 `scp` 分发配置文件至所有 Slave 节点。
+- 重启 YARN 服务：`stop-yarn.sh` -> `start-yarn.sh`。
 
 **2. 执行并发阻塞测试 (仅 FIFO 模式)**
 * **步骤**：
@@ -154,12 +181,10 @@ Giraph 对内存和容器数量极其敏感。在实验过程中，针对不同�
     2.  **窗口 A**：提交一个长耗时的 Giraph 大作业（配置参考第四阶段的大数据集最终方案）。
     3.  **窗口 B**：等待约 10 秒后，立即提交一个 MapReduce 小作业。
 * **观测点**：
-    1.  刷新 YARN Web UI (`http://MasterIP:8088`)。
-    2.  **关键现象**：记录 MapReduce 任务状态长时间处于 `ACCEPTED`（而非 `RUNNING`），且进度条停滞，直到 Giraph 任务彻底完成后，MR 任务才瞬间开始执行。
-    3.  **取证**：对包含两个任务状态的界面进行截图。
+    1.  刷新 YARN Web UI (`http://106.15.248.68:8088`)。
+    2.  **关键观察**：记录 MapReduce 任务状态长时间处于 `ACCEPTED`（而非 `RUNNING`），且进度条停滞，直到 Giraph 任务彻底完成后，MR 任务才瞬间开始执行。
+    3.  **截图**：对包含两个任务状态的界面进行截图。
 * **结论**：验证了 FIFO 调度器缺乏资源抢占机制，存在严重的排头阻塞问题。
-
-#### 四、 Giraph PageRank 实验
 
 ### 实验结果与分析
 
